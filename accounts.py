@@ -3,13 +3,10 @@ import string
 from datetime import datetime
 
 def generate_session_string():
-    """Генерирует фейковую сессию Telegram"""
     chars = string.ascii_letters + string.digits + '-_'
     return '1' + ''.join(random.choice(chars) for _ in range(350))
 
 def generate_account_data(account_type):
-    """Генерирует данные аккаунта в зависимости от типа"""
-    
     if account_type in ['usa_new', 'ru_new', 'ua_new']:
         phone = generate_phone(account_type)
         return {
@@ -51,7 +48,6 @@ def generate_account_data(account_type):
     return {}
 
 def generate_phone(account_type):
-    """Генерирует номер для аккаунта"""
     if account_type == 'usa_new':
         return f"+1{''.join([str(random.randint(0, 9)) for _ in range(10)])}"
     elif account_type == 'ru_new':
