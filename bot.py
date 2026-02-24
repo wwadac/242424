@@ -1,14 +1,13 @@
 import asyncio
 import logging
 import aiohttp
-import json
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
-from config import API_TOKEN, CRYPTOBOT_TOKEN, ADMIN_ID, RENT_PRICE, COUNTRIES, INVOICE_COOLDOWN, PHYS_ACCOUNTS
+from config import API_TOKEN, CRYPTOBOT_TOKEN, ADMIN_ID, RENT_PRICE, COUNTRIES, INVOICE_COOLDOWN, PHYS_ACCOUNTS, NUMBERS_PER_PAGE
 import database as db
 
 logging.basicConfig(level=logging.INFO)
@@ -191,7 +190,7 @@ async def open_rent_menu(callback: types.CallbackQuery, state: FSMContext):
 async def country_selected(callback: types.CallbackQuery, state: FSMContext):
     country_key = callback.data.replace("country_", "")
     country_data = COUNTRIES[country_key]
-    numbers = db.get_available_numbers(country_key, limit=5)
+    numbers = db.get_available_numbers(country_key, limit=NUMBERS_PER_PAGE)
     
     if not numbers:
         await callback.answer("❌ Нет свободных номеров", show_alert=True)
@@ -310,7 +309,7 @@ async def open_phys_menu(callback: types.CallbackQuery):
         parse_mode="HTML"
     )
 
-@dp.callback_query(F.data.startswith("phys_") and not F.data.startswith("phys_qty") and not F.data.startswith("phys_pay"))
+@dp.callback_query(F.data.startswith("phys_") & ~F.data.startswith("phys_qty") & ~F.data.startswith("phys_confirm"))
 async def select_phys_account(callback: types.CallbackQuery, state: FSMContext):
     account_type = callback.data.replace("phys_", "")
     if account_type not in PHYS_ACCOUNTS:
@@ -329,6 +328,103 @@ async def select_phys_account(callback: types.CallbackQuery, state: FSMContext):
         parse_mode="HTML"
     )
 
+@dp.callback_query(F.data.startswith("phys_qty_"))
+async def phys_quantity_selected(callback: types.CallbackQuery, state: FSMContext):
+    parts = callback.data.split('_')
+    # формат: phys_qty_{account_type}_{qty}
+    account_type = parts[2]
+    qty = int(parts[3])
+
+    account_info = PHYS_ACCOUNTS.get(account_type)
+    if not account_info:
+        await callback.answer("❌ Товар не найден", show_alert=True)
+        return
+
+    # расчёт цены
+    price_per_unit = account_info['price']
+    if account_info.get('bulk_price') and qty >= account_info.get('bulk_min', float('inf')):
+        price_per_unit = account_info['bulk_price']
+    total_price = round(price_per_unit * qty, 2)
+
+    # проверка кулдауна
+    if not db.check_cooldown(callback.from_user.id, INVOICE_COOLDOWN):
+        await callback.answer("⏳ Подождите 60 секунд!", show_alert=True)
+        return
+
+    # создаём счёт через CryptoBot
+    invoice_result = await create_invoice(total_price, f"{account_info['name']} x{qty}")
+    if not invoice_result.get('ok'):
+        await callback.answer("❌ Ошибка создания счета", show_alert=True)
+        return
+
+    invoice_data = invoice_result['result']
+    invoice_id = invoice_data['invoice_id']
+    invoice_url = invoice_data['pay_url']
+
+    # сохраняем данные в состоянии
+    await state.update_data(
+        phys_invoice_id=invoice_id,
+        phys_account_type=account_type,
+        phys_quantity=qty,
+        phys_total_price=total_price,
+        phys_price_per_unit=price_per_unit
+    )
+    await state.set_state(PhysState.waiting_payment)
+
+    # отправляем сообщение с оплатой
+    await callback.message.edit_text(
+        f"💳 <b>Счет создан!</b>\n\n"
+        f"Товар: {account_info['name']}\n"
+        f"Количество: {qty}\n"
+        f"Сумма: {total_price}$\n\n"
+        f"После оплаты нажмите кнопку ниже.",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="💳 Оплатить", url=invoice_url)],
+            [InlineKeyboardButton(text="✅ Я оплатил", callback_data="phys_confirm_pay")]
+        ]),
+        parse_mode="HTML"
+    )
+
+@dp.callback_query(F.data == "phys_confirm_pay")
+async def confirm_phys_payment(callback: types.CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    invoice_id = data.get('phys_invoice_id')
+    if not invoice_id:
+        await callback.answer("❌ Сначала создайте счет", show_alert=True)
+        return
+
+    status_result = await check_invoice_status(invoice_id)
+    if not (status_result.get('ok') and status_result['result'].get('status') == 'paid'):
+        await callback.answer("⏳ Платёж не найден или ещё не оплачен", show_alert=True)
+        return
+
+    # платёж подтверждён
+    account_type = data['phys_account_type']
+    quantity = data['phys_quantity']
+    price_per_unit = data['phys_price_per_unit']
+    user_id = callback.from_user.id
+
+    # генерируем и сохраняем аккаунты
+    account_ids = db.generate_and_save_phys_accounts(
+        account_type, quantity, user_id, price_per_unit
+    )
+
+    # получаем данные аккаунтов для выдачи
+    accounts_data = db.get_phys_accounts_by_ids(account_ids)
+
+    # формируем сообщение с аккаунтами
+    text = f"✅ <b>Оплачено!</b>\n\nВаши аккаунты:\n"
+    for acc in accounts_data:
+        text += f"\n📞 <code>{acc['phone']}</code>\n"
+        text += f"👤 {acc['username']} | {acc['password']}\n"
+        if acc.get('extra'):
+            text += f"📦 {acc['extra']}\n"
+        text += "—\n"
+
+    await callback.message.edit_text(text, parse_mode="HTML")
+    await state.clear()
+
+# --- ОБЩИЕ ---
 @dp.callback_query(F.data == "back_main")
 async def back_to_main(callback: types.CallbackQuery, state: FSMContext):
     await state.clear()
@@ -337,6 +433,7 @@ async def back_to_main(callback: types.CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data == "menu_purchases")
 async def show_purchases(callback: types.CallbackQuery):
+    # Здесь можно реализовать показ истории покупок
     await callback.answer("📦 Раздел в разработке", show_alert=True)
 
 @dp.callback_query(F.data == "menu_snoser")
