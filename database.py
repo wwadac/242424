@@ -1,6 +1,6 @@
 import sqlite3
 import random
-from datetime import datetime
+from datetime import datetime, timedelta  # ✅ Импортируем в начале файла!
 
 DB_NAME = 'gogogo.db'
 
@@ -117,7 +117,6 @@ def rent_number(number_id, user_id, duration_minutes=30):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     
-    from datetime import timedelta
     expired_at = datetime.now() + timedelta(minutes=duration_minutes)
     
     cursor.execute(
@@ -160,7 +159,6 @@ def check_cooldown(user_id, cooldown_seconds=60):
     row = cursor.fetchone()
     
     if row:
-        from datetime import datetime, timedelta
         last_time = datetime.strptime(row[0], '%Y-%m-%d %H:%M:%S')
         if datetime.now() - last_time < timedelta(seconds=cooldown_seconds):
             conn.close()
