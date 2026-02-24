@@ -1,7 +1,9 @@
 import sqlite3
 import random
+import json
 from datetime import datetime, timedelta
 from config import COUNTRIES, PHYS_ACCOUNTS
+from accounts import generate_account_data
 
 DB_NAME = 'gogogo.db'
 
@@ -181,6 +183,86 @@ def check_cooldown(user_id, cooldown_seconds=60):
     conn.commit()
     conn.close()
     return True
+
+# ----- Функции для физических аккаунтов -----
+def save_phys_account(account_type, account_data, user_id, price):
+    """Сохраняет один сгенерированный аккаунт в БД и возвращает его ID."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+
+    # подготовка extra_data (все поля, кроме основных)
+    extra_fields = {k: v for k, v in account_data.items() if k not in ['phone', 'session', 'username', 'password']}
+    extra_json = json.dumps(extra_fields, ensure_ascii=False)
+
+    cursor.execute('''
+        INSERT INTO phys_accounts 
+        (account_type, phone, session, username, password, extra_data, is_sold, sold_to, sold_at)
+        VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
+    ''', (
+        account_type,
+        account_data.get('phone', ''),
+        account_data.get('session', ''),
+        account_data.get('username', ''),
+        account_data.get('password', ''),
+        extra_json,
+        user_id,
+        datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    ))
+    account_id = cursor.lastrowid
+
+    # запись в историю покупок
+    cursor.execute('''
+        INSERT INTO phys_purchases (user_id, account_type, account_id, price, created_at)
+        VALUES (?, ?, ?, ?, ?)
+    ''', (
+        user_id,
+        account_type,
+        account_id,
+        price,
+        datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    ))
+
+    conn.commit()
+    conn.close()
+    return account_id
+
+def generate_and_save_phys_accounts(account_type, quantity, user_id, price_per_unit):
+    """Генерирует нужное количество аккаунтов и сохраняет в БД. Возвращает список ID."""
+    ids = []
+    for _ in range(quantity):
+        acc_data = generate_account_data(account_type)
+        acc_id = save_phys_account(account_type, acc_data, user_id, price_per_unit)
+        ids.append(acc_id)
+    return ids
+
+def get_phys_accounts_by_ids(ids):
+    """Возвращает список аккаунтов по их ID для выдачи пользователю."""
+    if not ids:
+        return []
+    placeholders = ','.join('?' * len(ids))
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute(f'''
+        SELECT phone, session, username, password, extra_data
+        FROM phys_accounts
+        WHERE id IN ({placeholders})
+    ''', ids)
+    rows = cursor.fetchall()
+    conn.close()
+    result = []
+    for row in rows:
+        phone, session, username, password, extra_json = row
+        extra = json.loads(extra_json) if extra_json else {}
+        # форматируем extra в строку для вывода
+        extra_str = ', '.join(f"{k}: {v}" for k, v in extra.items())
+        result.append({
+            'phone': phone,
+            'session': session,
+            'username': username,
+            'password': password,
+            'extra': extra_str
+        })
+    return result
 
 # Инициализация
 init_db()
