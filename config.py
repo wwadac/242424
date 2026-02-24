@@ -1,15 +1,16 @@
-# Токены
+# ================= ТОКЕНЫ =================
 API_TOKEN = '8500113818:AAEIG8aABNiwbCXLq08KzxJ1fkv1PhJtnqQ'
 CRYPTOBOT_TOKEN = '528164:AAfmR2y2vzP5sM0Miv5HHW48oyEW3DVB3Er'
 
-# Админ
+# ================= АДМИН =================
 ADMIN_ID = 8000395560
 
-# Цены аренды номеров
+# ================= АРЕНДА НОМЕРОВ =================
 RENT_PRICE = 1.5
-RENT_DURATION = 30
+RENT_DURATION = 30  # минут
+NUMBERS_PER_PAGE = 5
 
-# Страны для аренды
+# ================= СТРАНЫ (5 ШТ) =================
 COUNTRIES = {
     'russia': {'code': '+7', 'name': 'Россия', 'flag': '🇷🇺', 'count': 15},
     'usa': {'code': '+1', 'name': 'США', 'flag': '🇺🇸', 'count': 15},
@@ -18,7 +19,7 @@ COUNTRIES = {
     'ukraine': {'code': '+380', 'name': 'Украина', 'flag': '🇺🇦', 'count': 5},
 }
 
-# 🛒 Цены на Физ аккаунты
+# ================= ФИЗ АККАУНТЫ =================
 PHYS_ACCOUNTS = {
     'usa_new': {
         'name': '🇺🇸 США +1 (Новый)',
@@ -49,7 +50,7 @@ PHYS_ACCOUNTS = {
         'description': 'Рандом страна, отлежка 5-9 лет'
     },
     'ru_2020': {
-        'name': '🇷 РФ 2020',
+        'name': '🇷🇺 РФ 2020',
         'price': 8.0,
         'bulk_price': None,
         'bulk_min': None,
@@ -92,5 +93,5 @@ PHYS_ACCOUNTS = {
     },
 }
 
-# Анти-спам
-INVOICE_COOLDOWN = 60
+# ================= АНТИ-СПАМ =================
+INVOICE_COOLDOWN = 60  # секунд
